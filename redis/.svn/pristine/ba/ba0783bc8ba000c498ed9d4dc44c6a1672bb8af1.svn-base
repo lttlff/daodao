@@ -1,0 +1,54 @@
+<redis_server excepnum_to_death="2" scan_interval_misecond="60000" test_connection_count="3" default_expire_seconds="-1">
+    <servers keypattern=".*" desc="start1">
+       <server name="server1" host="127.0.0.1" port="6379">
+       	  <param name="minIdle" value="0" />
+          <param name="maxIdle" value="500" />
+          <param name="maxActive" value="1000" />
+          <param name="maxWait" value="3000" />
+          <param name="readOnly" value="false" />
+          <param name="slaveof" value="servername" />
+          <param name="save" value="false" />
+       </server>
+       <!-- <server name="server3" host="127.0.0.1" port="63792">
+          <param name="minIdle" value="50" />
+          <param name="maxIdle" value="60000" />
+          <param name="maxActive" value="500" />
+          <param name="maxWait" value="3000" />
+          <param name="readOnly" value="false" />
+          <param name="slaveof" value="servername" />
+          <param name="save" value="false" />
+       </server> -->
+    </servers>
+    <!-- 
+    <servers keypattern="^2.*" desc="start2">
+       <server name="server1" host="127.0.0.1" port="63791">
+       	  <param name="minIdle" value="50" />
+          <param name="maxIdle" value="60000" />
+          <param name="maxActive" value="500" />
+          <param name="maxWait" value="3000" />
+          <param name="readOnly" value="false" />
+          <param name="slaveof" value="servername" />
+          <param name="save" value="false" />
+       </server>
+       <server name="server3" host="127.0.0.1" port="63793">
+          <param name="minIdle" value="50" />
+          <param name="maxIdle" value="60000" />
+          <param name="maxActive" value="500" />
+          <param name="maxWait" value="10000" />
+          <param name="readOnly" value="true" />
+          <param name="slaveof" value="servername" />
+          <param name="save" value="false" />
+       </server>
+    </servers> -->
+    <!-- <servers keypattern="^3.*" desc="start3">
+     <server name="server1" host="127.0.0.1" port="63794">
+       	  <param name="minIdle" value="50" />
+          <param name="maxIdle" value="60000" />
+          <param name="maxActive" value="500" />
+          <param name="maxWait" value="10000" />
+          <param name="readOnly" value="false" />
+          <param name="slaveof" value="servername" />
+          <param name="save" value="false" />
+       </server>
+    </servers> -->
+</redis_server>

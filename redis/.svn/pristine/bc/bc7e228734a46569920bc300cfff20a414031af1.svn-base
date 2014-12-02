@@ -1,0 +1,206 @@
+package org.dacell.redis.redishandler;
+
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.Pipeline;
+
+import org.dacell.redis.domain.Redis_KeySetDomain;
+import org.dacell.redis.servicemanager.MonitorExcepRedisPoolThread;
+import org.dacell.redis.servicemanager.RedisPool;
+import org.dacell.redis.util.SerializeUtil;
+
+public class HashHandler {
+	private RedisPool redisPool;
+	private Log LOG = LogFactory.getLog(HashHandler.class);
+
+	public HashHandler(RedisPool redisPool) {
+		this.redisPool = redisPool;
+	}
+	
+	public void hset(String key, String field, Object value){
+		this.hset(key, field, value,MonitorExcepRedisPoolThread.getDEFAULT_EXPIRE_SECONDS());
+	}
+	
+	public void hset(String key, String field, Object value, Long expireTime) {
+		Jedis jedis = redisPool.getResource();
+		try {
+			
+			byte[] byteKey = SerializeUtil.serializeKey(key);
+			byte[] byteField = SerializeUtil.serialize(field);
+			byte[] storeValue = SerializeUtil.serialize(value);
+			LOG.debug("[DEBUG:]hset the value[" + value + "] in the key[" + key
+					+ "]");
+			Pipeline pl = jedis.pipelined();
+			pl.hset(byteKey, byteField, storeValue);
+			if (expireTime > 0) {
+				pl.expire(byteKey, expireTime.intValue());
+			}
+			// pl.exec();
+			pl.sync();
+			redisPool.returnResource(jedis);
+			LOG.debug("[DEBUG]set:" + storeValue + ". set over!");
+		} catch (Exception e) {
+			redisPool.returnBrokenResource(jedis);
+			// throw e;
+			LOG.error(redisPool.getExceptionMsg("operator[hset] jedis is error!"), e);
+		}
+	}
+	
+	
+	public Object hget(String key, String field) {
+		Jedis jedis = redisPool.getResource();
+		try {
+			byte[] byteKey = SerializeUtil.serializeKey(key);
+			byte[] byteField = SerializeUtil.serialize(field);
+			byte[] storeValue = jedis.hget(byteKey, byteField);
+			redisPool.returnResource(jedis);
+			Object value = SerializeUtil.unSerialize(storeValue);
+			return value;
+		} catch (Exception e) {
+			redisPool.returnBrokenResource(jedis);
+			LOG.error(redisPool.getExceptionMsg("operator[hget] jedis is error!"), e);
+			return null;
+		}
+	}
+	
+	public List<Object> hmget(String key, String... fields) {
+		Jedis jedis = redisPool.getResource();
+		try {
+			byte[] byteKey = SerializeUtil.serializeKey(key);
+			byte[][] byteFields = SerializeUtil.serializes(fields);
+			List<byte[]> storeValues = jedis.hmget(byteKey, byteFields);
+			redisPool.returnResource(jedis);
+			List<Object> values = SerializeUtil.unSerializeList(storeValues);
+			return values;
+		} catch (Exception e) {
+			redisPool.returnBrokenResource(jedis);
+			LOG.error(redisPool.getExceptionMsg("operator[hmget] jedis is error!"), e);
+			return null;
+		}
+	}
+	
+	public Map<String, Object> hgetAll(String key) {
+		Jedis jedis = redisPool.getResource();
+		try {
+			byte[] byteKey = SerializeUtil.serializeKey(key);
+			Map<byte[], byte[]> storeValue = jedis.hgetAll(byteKey);
+			redisPool.returnResource(jedis);
+			Map<String, Object> value = SerializeUtil.unSerializeMap(storeValue);
+			return value;
+		} catch (Exception e) {
+			redisPool.returnBrokenResource(jedis);
+			LOG.error(redisPool.getExceptionMsg("operator[hgetAll] jedis is error!"), e);
+			return null;
+		}
+	}
+	
+	public int hdel(String key, String field) {
+		Jedis jedis = redisPool.getResource();
+		try {
+			byte[] byteKey = SerializeUtil.serializeKey(key);
+			byte[] byteField = SerializeUtil.serialize(field);
+			Long result = jedis.hdel(byteKey, byteField);
+			redisPool.returnResource(jedis);
+			if (result > 0) {
+				return result.intValue();
+			}
+			return 0;
+		} catch (Exception e) {
+			redisPool.returnBrokenResource(jedis);
+			LOG.error(redisPool.getExceptionMsg("operator[hdel] jedis is error!"), e);
+			return 0;
+		}
+	}
+	
+	/**
+	 * 插入多个key-value键值队，并且value类型为hash数据的结构里面插入field-value
+	 * 
+	 * @param poolName
+	 * @param keyfieldvalues
+	 */
+	public void mhmset(final Map<String, Map<String, Object>> keyfieldvalues) {
+		Jedis jedis = redisPool.getResource();
+		try {
+			Pipeline pl = jedis.pipelined();
+			for (Iterator<String> it = keyfieldvalues.keySet().iterator(); it.hasNext();) {
+				String key = it.next();
+				Map<String, Object> fieldvalue = keyfieldvalues.get(key);
+				byte[] byteKey = SerializeUtil.serializeKey(key);
+				if (fieldvalue != null && !fieldvalue.isEmpty()) {
+					Map<byte[], byte[]> hash = SerializeUtil.serializeMap(fieldvalue);
+					if (hash == null) {
+						continue;
+					}
+					LOG.debug("[DEBUG:]hset the value[" + hash.toString()
+							+ "] in the key[" + key + "]");
+					pl.hmset(byteKey, hash);
+				}
+
+//				pl.expire(key, redisPool.getDefaultLiveTime().intValue());
+				pl.expire(byteKey, -1);
+			}
+			pl.sync();
+			redisPool.returnResource(jedis);
+		} catch (Exception e) {
+			redisPool.returnBrokenResource(jedis);
+			LOG.error(redisPool.getExceptionMsg("operator[mhset] jedis is error!"), e);
+		}
+
+	}
+	
+	/**
+	 * 插入多个key-value键值队，并且value类型为hash数据的结构里面插入field-value,带过期时间
+	 * 
+	 * keyExpire键值对需要注意： 1、如果key包含的expire为null，则按poolName配置的生存时间设置生存期
+	 * 2、如果key包含的expire为0或者小于0，则表示永不过期 3、如果key包含的expire大于0，则按expire设置过期时间.
+	 * 
+	 * @param poolName
+	 * @param keyfieldvalues
+	 * @param keyexpires
+	 */
+	public void mehmset(final Map<String, Map<String, Object>> keyfieldvalues,final Map<String, Integer> keyexpires) {
+		if (keyfieldvalues == null || keyexpires == null|| keyfieldvalues.isEmpty())
+			return;
+		Jedis jedis = redisPool.getResource();
+		try {
+			Pipeline pl = jedis.pipelined();
+			for (Iterator<String> it = keyfieldvalues.keySet().iterator(); it
+					.hasNext();) {
+				String key = it.next();
+				Map<String, Object> fieldvalue = keyfieldvalues.get(key);
+				byte[] byteKey = SerializeUtil.serializeKey(key);
+				if (fieldvalue != null && !fieldvalue.isEmpty()) {
+					Map<byte[], byte[]> hash = SerializeUtil
+							.serializeMap(fieldvalue);
+					if (hash == null) {
+						continue;
+					}
+					LOG.debug("[DEBUG:]hset the value[" + hash.toString()
+							+ "] in the key[" + key + "]");
+					pl.hmset(byteKey, hash);
+					Integer expire = keyexpires.get(key);
+					if (expire != null) {
+						if (expire > 0) {
+							pl.expire(byteKey, expire);
+						}
+					} else {
+//						pl.expire(key, redisPool.getDefaultLiveTime().intValue());
+						pl.expire(byteKey, -1);
+					}
+				}
+			}
+			pl.sync();
+			redisPool.returnResource(jedis);
+		} catch (Exception e) {
+			redisPool.returnBrokenResource(jedis);
+			LOG.error(redisPool.getExceptionMsg("operator[mehmset] jedis is error!"), e);
+		}
+	}
+
+}

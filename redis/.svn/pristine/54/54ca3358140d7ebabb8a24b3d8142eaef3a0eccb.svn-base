@@ -1,0 +1,123 @@
+package org.dacell.redis.redishandler;
+
+import java.util.List;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.Pipeline;
+import org.dacell.redis.domain.Redis_KeySetDomain;
+import org.dacell.redis.servicemanager.MonitorExcepRedisPoolThread;
+import org.dacell.redis.servicemanager.RedisPool;
+import org.dacell.redis.util.SerializeUtil;
+
+public class StringHandler {
+	private RedisPool redisPool;
+	private Log LOG = LogFactory.getLog(StringHandler.class);
+
+	public StringHandler(RedisPool redisPool) {
+		this.redisPool = redisPool;
+	}
+	
+	public void set(String key, Object value) {
+		set(key, value,MonitorExcepRedisPoolThread.getDEFAULT_EXPIRE_SECONDS());
+	}
+	
+	public void append(String key, Object value) {
+		Jedis jedis = redisPool.getResource();
+		if (jedis == null) {
+			throw new RuntimeException("获取Jedis连接失败!");
+		}
+		byte[] byte_key = SerializeUtil.serializeKey(key);
+		byte[] storeValue = SerializeUtil.serialize(value);
+		try {
+			Pipeline pl = jedis.pipelined();
+			pl.append(byte_key, storeValue);
+			pl.sync();
+			redisPool.returnResource(jedis);
+			LOG.debug("[DEBUG]set:" + storeValue + ". set over!");
+		} catch (Exception e) {
+			redisPool.returnBrokenResource(jedis);
+			LOG.error(redisPool.getExceptionMsg("operator[set] jedis is error!"), e);
+		}
+	}
+	public List<Object> mget(String... keys) {
+		Jedis jedis = redisPool.getResource();
+		if (jedis == null) {
+			throw new RuntimeException("获取Jedis连接失败!");
+		}
+		try {
+			byte[][] byteKeys= SerializeUtil.serializeKeys(keys);
+			List<byte[]> value = jedis.mget(byteKeys);
+			redisPool.returnResource(jedis);
+			List<Object> values = SerializeUtil.unSerializeList(value);
+			return values;
+		} catch (Exception e) {
+			redisPool.returnBrokenResource(jedis);
+			LOG.error(redisPool.getExceptionMsg("operator[mget] jedis is error!"), e);
+			return null;
+		}
+	}
+
+	public void set(String key, Object value, Long expireTime) {
+		Jedis jedis = redisPool.getResource();
+		if (jedis == null) {
+			throw new RuntimeException("获取Jedis连接失败!");
+		}
+		byte[] byte_key = SerializeUtil.serializeKey(key);
+		byte[] storeValue = SerializeUtil.serialize(value);
+		try {
+			Pipeline pl = jedis.pipelined();
+			pl.set(byte_key, storeValue);
+			if (expireTime > 0) {
+				pl.expire(byte_key, expireTime.intValue());
+			}
+			pl.sync();
+			redisPool.returnResource(jedis);
+			LOG.debug("[DEBUG]set:" + storeValue + ". set over!");
+		} catch (Exception e) {
+			e.printStackTrace();
+			redisPool.returnBrokenResource(jedis);
+			LOG.error(redisPool.getExceptionMsg("operator[set] jedis is error!"), e);
+		}
+	}
+	public Long setnx(String key, Object value) {
+		Long result = 0l;
+		Jedis jedis = redisPool.getResource();
+		if (jedis == null) {
+			throw new RuntimeException("获取Jedis连接失败!");
+		}
+		byte[] byte_key = SerializeUtil.serializeKey(key);
+		byte[] storeValue = SerializeUtil.serialize(value);
+		try {
+			result = jedis.setnx(byte_key, storeValue);
+			redisPool.returnResource(jedis);
+			LOG.debug("[DEBUG]set:" + storeValue + ". set over!");
+		} catch (Exception e) {
+			redisPool.returnBrokenResource(jedis);
+			LOG.error(redisPool.getExceptionMsg("operator[set] jedis is error!"), e);
+		}
+		return result;
+	}
+	public Object get(String key) {
+		Jedis jedis = redisPool.getResource();
+//		System.out.println(key+"==:=="+jedis.getClient().getPort());
+		if (jedis == null) {
+			// 如果获取读失败，是否重新可以从写组获取
+			throw new RuntimeException("获取Jedis连接失败!");
+		}
+		try {
+			byte[] byte_key = SerializeUtil.serializeKey(key);
+			byte[] storeValue = jedis.get(byte_key);
+			redisPool.returnResource(jedis);
+			Object value = SerializeUtil.unSerialize(storeValue);
+			return value;
+		} catch (Exception e) {
+			redisPool.returnBrokenResource(jedis);
+			LOG.error(redisPool.getExceptionMsg("operator[get] jedis is error!"), e);
+			return null;
+		}
+	}
+	
+}

@@ -1,0 +1,317 @@
+package org.dacell.redis.servicemanager;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import org.dacell.redis.cfg.RpcXmlConfigure;
+import org.dacell.redis.servicehandler.RedisHashHandler;
+import org.dacell.redis.servicehandler.RedisKeyHandler;
+import org.dacell.redis.servicehandler.RedisListHandler;
+import org.dacell.redis.servicehandler.RedisSetHandler;
+import org.dacell.redis.servicehandler.RedisSortedSetHandler;
+import org.dacell.redis.servicehandler.RedisStringHandler;
+
+public class RedisServiceHandler {
+	private static RedisServiceHandler redisServiceHandler = null;
+	private static RedisServerPools redisServerPools;
+	private static RedisManager redisManager;
+	
+	private RedisKeyHandler redisKeyHandler;
+	private RedisStringHandler redisStringHandler;
+	private RedisHashHandler redisHashHandler;
+	private RedisListHandler redisListHandler;
+	private RedisSetHandler redisSetHandler;
+	private RedisSortedSetHandler redisSortedSetHandler;
+	
+	private RedisServiceHandler(RedisServerPools redisServerPools,RedisManager redisManager) {
+		RedisServiceHandler.redisServerPools = redisServerPools;
+		RedisServiceHandler.redisManager=redisManager;
+	}
+	
+	public static RedisServiceHandler initRedisService(RedisServerPools redisServerPools1,RedisManager redisManager1) {
+		if (redisServiceHandler == null) {
+			redisServiceHandler = new RedisServiceHandler(redisServerPools1,redisManager1);
+		}
+		return redisServiceHandler;
+	}
+
+	public void initRedisServiceHandler(){
+		redisKeyHandler=new RedisKeyHandler(redisServerPools,redisManager);
+		redisStringHandler=new RedisStringHandler(redisServerPools,redisManager);
+		redisHashHandler=new RedisHashHandler(redisServerPools,redisManager);
+		redisListHandler=new RedisListHandler(redisServerPools,redisManager);
+		redisSetHandler=new RedisSetHandler(redisServerPools,redisManager);
+		redisSortedSetHandler=new RedisSortedSetHandler(redisServerPools,redisManager);
+	}
+	//上面2个接口初始化结束才可以正常调用该接口
+	public static RedisServiceHandler getInstance(){
+		if(redisServiceHandler==null){
+			RedisManager redisManager=RedisManager.getInstance();
+			redisManager.addCache2Pool(RpcXmlConfigure.getRedis_KeySet());
+		}
+		return redisServiceHandler;
+	}
+	/**
+	 * 清楚所有缓存
+	 *@author lff 2013-5-30 下午03:43:45
+	 */
+	public void flushAll(){
+		redisKeyHandler.flushAll();
+	}
+	/*************************KEY*************************************/
+	/**
+	 * 列出匹配的key
+	 */
+	public Set<String> keys(String keyPattern){
+		return redisKeyHandler.keys(keyPattern);
+	}
+	/**
+	 * 检查给定key是否存在。 
+	 *@author lff 2013-6-26 上午11:35:16  
+	 * @param key
+	 * @return
+	 */
+	public Boolean exists(String key){
+		return redisKeyHandler.exists(key);
+	}
+	/**
+	 * key seconds(以秒为单位)  为给定key设置生存时间。当key过期时，它会被自动删除。 
+	 *@author lff 2013-6-26 上午11:25:37  
+	 * @param key
+	 * @param expireTime
+	 */
+	public void expire(String key, int expireTime){
+		redisKeyHandler.expire(key, expireTime);
+	}
+	/**
+	 * 移除给定key的生存时间
+	 *@author lff 2013-6-26 上午11:34:17  
+	 * @param key
+	 * @return
+	 */
+	public Long persist(String key){
+		return redisKeyHandler.persist(key);
+	}
+	/**
+	 * 返回给定key的剩余生存时间(time to live)(以秒为单位) 
+	 *@author lff 2013-6-26 上午11:37:05  
+	 * @param key
+	 * @return
+	 */
+	public Long ttl(String key){
+		return redisKeyHandler.ttl(key);
+	}
+	/**
+	 *  移除给定的一个或多个key。如果key不存在，则忽略该命令。 
+	 *@author lff 2013-6-26 上午11:37:29  
+	 * @param key
+	 * @return
+	 */
+	public int del(String key){
+		return redisKeyHandler.del(key);
+	}
+	/**
+	 * 删除匹配的所有key
+	 *@author lff 2013-6-26 上午11:37:37  
+	 * @param key
+	 * @return
+	 */
+	public int deleteMatchKey(String key){
+		return redisKeyHandler.deleteMatchKey(key);
+	}
+	/*************************String*************************************/
+	public List<Object> mget(String... keys){
+		return redisStringHandler.mget(keys);
+	}
+	
+	public void set_has_expire(String key, Object value, int expireTime){
+		redisStringHandler.set_has_expire(key, value, expireTime);
+	}
+	public void set(String key, Object value){
+		redisStringHandler.set(key, value);
+	}
+	public Long setnx(String key, Object value){
+		return redisStringHandler.setnx(key, value);
+	}
+	public void append(String key, Object value){
+		redisStringHandler.append(key, value);
+	}
+	public Object get(String key){
+		return redisStringHandler.get(key);
+	}
+	
+	public List<Object> query(String keyPattern){
+		Set<String> keys =  this.keys(keyPattern);
+		if(keys==null || keys.size()<1){
+			return null;
+		}
+		List<Object> list = new ArrayList<Object>();
+		for(String key : keys){
+			Object object = this.get(key);
+			list.add(object);
+		}
+		return list;
+	}
+	/*************************hash*************************************/
+	public void hset(String key, String field, Object value){
+		 redisHashHandler.hset(key, field, value);
+	}
+	
+	public Object hget(String key, String field){
+		return redisHashHandler.hget(key, field);
+	}
+	
+	public List<Object> hmget(String key, String... fields){
+		return redisHashHandler.hmget(key, fields);
+	}
+	
+	public Map<String, Object> hgetAll(String key){
+		return redisHashHandler.hgetAll(key);
+	}
+	
+	public int hdel(String key, String field){
+		return redisHashHandler.hdel(key, field);
+	}
+	
+	public void hset_has_expire(String key, String field, Object value, int expireTime) {
+		redisHashHandler.hset_has_expire(key, field, value, expireTime);
+	}
+	
+	public void mhmset(final Map<String, Map<String, Object>> keyfieldvalues){
+		redisHashHandler.mhmset(keyfieldvalues);
+	}
+	
+	public void mehmset(final Map<String, Map<String, Object>> keyfieldvalues,
+			final Map<String, Integer> keyexpires) {
+		redisHashHandler.mehmset(keyfieldvalues, keyexpires);
+	}
+	/*************************Set*************************************/
+	public void sAdd(String key, Object value){
+		redisSetHandler.sAdd(key, value);
+	}
+	
+	public void sAdd_has_expire(String key, Object value, int expireTime) {
+		redisSetHandler.sAdd_has_expire(key, value, expireTime);
+	}
+	
+	public Object sPop(String key){
+		return redisSetHandler.sPop(key);
+	}
+	
+	public Set<Object> sMembers(String key) {
+		return redisSetHandler.sMembers(key);
+	}
+	
+	public Long sRem(String key, Object... values) {
+		return redisSetHandler.sRem(key, values);
+	}
+	/*************************List*************************************/
+	public void lpush(String key, Object value) {
+		redisListHandler.lpush(key, value);
+	}
+	
+	public void lpush_has_expire(String key, Object value, int expireTime) {
+		redisListHandler.lpush_has_expire(key, value, expireTime);
+	}
+	
+	public void rpush(String key, Object value) {
+		redisListHandler.rpush(key, value);
+	}
+	
+	public void rpush_has_expire(String key, Object value, int expireTime) {
+		redisListHandler.rpush_has_expire(key, value, expireTime);
+	}
+	
+	public Object lpop(String key) {
+		return redisListHandler.lpop(key);
+	}
+	
+	public Object rpop(String key) {
+		return redisListHandler.rpop(key);
+	}
+	
+	public Long lLength(String key) {
+		return redisListHandler.lLength(key);
+	}
+	
+	public Long lRemove(String key, String value) {
+		return redisListHandler.lRemove(key, value);
+	}
+	
+	public void lset(String key, int index,Object value) {
+		 redisListHandler.lset(key, index, value);
+	}
+	
+	public List<Object> lget(String key) {
+		return redisListHandler.lget(key);
+	}
+	
+	public Object lindex(String key,int index) {
+		return redisListHandler.lindex(key, index);
+	}
+	
+	public List<Object> lRange(String key, int start, int end) {
+		return redisListHandler.lRange(key, start, end);
+	}
+	
+	public boolean blpop(String key) {
+		return redisListHandler.blpop(key);
+	}
+	
+	public boolean brpop(String key) {
+		return redisListHandler.brpop(key);
+	}
+	/*************************SortedSet*************************************/
+	/*************************SortedSet*************************************/
+	public RedisKeyHandler getRedisKeyHandler() {
+		return redisKeyHandler;
+	}
+
+	public void setRedisKeyHandler(RedisKeyHandler redisKeyHandler) {
+		this.redisKeyHandler = redisKeyHandler;
+	}
+
+	public RedisStringHandler getRedisStringHandler() {
+		return redisStringHandler;
+	}
+
+	public void setRedisStringHandler(RedisStringHandler redisStringHandler) {
+		this.redisStringHandler = redisStringHandler;
+	}
+
+	public RedisHashHandler getRedisHashHandler() {
+		return redisHashHandler;
+	}
+
+	public void setRedisHashHandler(RedisHashHandler redisHashHandler) {
+		this.redisHashHandler = redisHashHandler;
+	}
+
+	public RedisListHandler getRedisListHandler() {
+		return redisListHandler;
+	}
+
+	public void setRedisListHandler(RedisListHandler redisListHandler) {
+		this.redisListHandler = redisListHandler;
+	}
+
+	public RedisSetHandler getRedisSetHandler() {
+		return redisSetHandler;
+	}
+
+	public void setRedisSetHandler(RedisSetHandler redisSetHandler) {
+		this.redisSetHandler = redisSetHandler;
+	}
+
+	public RedisSortedSetHandler getRedisSortedSetHandler() {
+		return redisSortedSetHandler;
+	}
+
+	public void setRedisSortedSetHandler(RedisSortedSetHandler redisSortedSetHandler) {
+		this.redisSortedSetHandler = redisSortedSetHandler;
+	}
+
+
+}

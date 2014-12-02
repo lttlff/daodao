@@ -1,0 +1,298 @@
+package org.dacell.redis.servicemanager;
+
+import java.util.List;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.apache.commons.pool.impl.GenericObjectPool;
+
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.JedisPoolConfig;
+import org.dacell.redis.domain.Redis_ServerDomain;
+import org.dacell.redis.redishandler.HashHandler;
+import org.dacell.redis.redishandler.KeyHandler;
+import org.dacell.redis.redishandler.ListHandler;
+import org.dacell.redis.redishandler.PubSubHandler;
+import org.dacell.redis.redishandler.SetHandler;
+import org.dacell.redis.redishandler.SortedSetHandler;
+import org.dacell.redis.redishandler.StringHandler;
+
+public class RedisPool {
+	// 获取该池对应的服务器的配置情况,通过连接池推测该服务是可读还是挂了,在log中应用
+	private Redis_ServerDomain redis_Server_instanceDomain;
+
+	private boolean isDead = false;
+	private JedisPool jedisPool;
+//	private static final int TEST_CONNECTION_COUNT = Integer.valueOf((String)Redis_KeySetDomain.getServerExecuteParam("test_connection_count"));
+	private static Log LOG = LogFactory.getLog(RedisPool.class);
+	
+	//以下定义为了更好地监控，能够在pool死亡的时候，从KeyServpool的读写列表中删除，复活的时候重新写入
+	//定义该pool是否只读
+	private boolean read_only = false;
+	private KeyServerPools keyServerPools;
+	
+	private KeyHandler keyHandler;
+	private StringHandler stringHandler;
+	private HashHandler hashHandler;
+	private ListHandler listHandler;
+	private SetHandler setHandler;
+	private PubSubHandler pubSubHandler;
+	private SortedSetHandler sortedSetHandler;
+//	private ListHandler listHandler;
+//	private ListHandler listHandler;
+//	private ListHandler listHandler;
+	
+	public JedisPool createJedisPool(Redis_ServerDomain redis_Server_instance){
+		JedisPoolConfig jpc = new JedisPoolConfig();
+//		jpc.setMaxActive(Integer.valueOf(redis_Server_instance.getServerAttrMap().get("maxActive")));
+		jpc.setMaxTotal(Integer.valueOf(redis_Server_instance.getServerAttrMap().get("maxActive")));
+		jpc.setMaxIdle(Integer.valueOf(redis_Server_instance.getServerAttrMap().get("maxIdle")));
+		//jpc.setMaxWait(Long.valueOf(redis_Server_instance.getServerAttrMap().get("maxWait")));
+		jpc.setMaxWaitMillis(Long.valueOf(redis_Server_instance.getServerAttrMap().get("maxWait")));
+		jpc.setTestOnBorrow(true);
+		jpc.setMinIdle(Integer.valueOf(redis_Server_instance.getServerAttrMap().get("minIdle")));
+		//jpc.whenExhaustedAction = GenericObjectPool.WHEN_EXHAUSTED_GROW;
+		jpc.setBlockWhenExhausted(false);
+		jedisPool = new JedisPool(jpc, redis_Server_instance.getHost(), redis_Server_instance.getPort().intValue());
+		return jedisPool;
+	}
+	
+	public void initRedisHandler(){
+		keyHandler=new KeyHandler(this);
+		stringHandler=new StringHandler(this);
+		hashHandler=new HashHandler(this);
+		listHandler=new ListHandler(this);
+		setHandler=new SetHandler(this);
+		pubSubHandler=new PubSubHandler(this);
+		sortedSetHandler=new SortedSetHandler(this);
+	}
+
+//以下三个需要修改成private
+	public Jedis getResource() {
+		Jedis jedis = null;
+		try {
+			
+			jedis = jedisPool.getResource();
+		} catch (Exception e) {
+			LOG.error(getExceptionMsg(e.getMessage()), e);
+			RedisManager.getInstance().add2ExceptionPool(this);
+		}
+		return jedis;
+	}
+
+	public boolean returnResource(Jedis jedis) {
+		jedisPool.returnResource(jedis);
+		return true;
+	}
+
+	public boolean returnBrokenResource(Jedis jedis) {
+		jedisPool.returnBrokenResource(jedis);
+		return true;
+	}
+
+	public boolean testConnection() {
+		for (int i = 0; i < MonitorExcepRedisPoolThread.getTEST_CONNECTION_COUNT(); i++) {
+			Jedis jedis = this.getResource();
+			if (jedis != null) {
+				this.returnResource(jedis);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public void distoryPool() {
+		try {
+			jedisPool.destroy();
+			jedisPool = null;
+		} catch (RuntimeException e) {
+			LOG.error(getExceptionMsg(e.getMessage()), e);
+		}
+	}
+	
+	
+	//可能修改成private
+	public String getExceptionMsg(String realExceptionMsg) {
+		StringBuffer errorMsg = new StringBuffer();
+		// errorMsg.append("缓存名:"
+		// + ((s_cache_server_defDomain == null ||
+		// s_cache_server_defDomain.getCacheDefDomain() == null) ? "空缓存对象!"
+		// : s_cache_server_defDomain.getCacheDefDomain().getName()));
+		errorMsg.append("\n");
+		// errorMsg.append("服务器地址："
+		// + ((s_cache_server_defDomain == null ||
+		// s_cache_server_defDomain.getServerInstanceDomain() == null) ?
+		// "空的缓存服务器地址!"
+		// : (s_cache_server_defDomain.getServerInstanceDomain().getHost() +":"+
+		// s_cache_server_defDomain
+		// .getServerInstanceDomain().getPort())));
+		errorMsg.append("\n");
+		errorMsg.append(realExceptionMsg);
+		return errorMsg.toString();
+	}
+
+	public boolean isDead() {
+		if(!isDead){
+			try{
+				Jedis jedis = this.getResource();
+				if (jedis != null) {
+					this.returnResource(jedis);
+					return false;
+				}
+			}catch(Exception e){
+//				LOG.error(getExceptionMsg(e.getMessage()), e);
+			}
+		}
+		return true;
+//		return isDead;
+	}
+//两个对象相互引用，对各自引用的操作就是对两个对象的操作
+	public void setDead(boolean isDead) {
+		this.isDead = isDead;
+		if(isDead){
+			if(this.isRead_only()){
+				List<RedisPool> readPoolList=this.getKeyServerPools().getReadPools();
+				readPoolList.remove(this);
+//				for(RedisPool pool:readPoolList){
+//					if(this.getRedis_Server_instanceDomain().getName().equals(pool.getRedis_Server_instanceDomain().getName())){
+//						readPoolList.remove(pool);
+//						break;
+//					}
+//				}
+			}else{
+				List<RedisPool> writePoolList=this.getKeyServerPools().getWriterPools();
+				writePoolList.remove(this);
+//				for(RedisPool pool:writePoolList){
+//					if(this.getRedis_Server_instanceDomain().getName().equals(pool.getRedis_Server_instanceDomain().getName())){
+//						writePoolList.remove(pool);
+//						break;
+//					}
+//				}
+			}
+		}else{
+			//先检查是否在里面，如果不在里面就加入，在里面就不操作
+			if(this.isRead_only()){
+				List<RedisPool> readPoolList=this.getKeyServerPools().getReadPools();
+				boolean flag=false;
+				for(RedisPool pool:readPoolList){
+					if(this.getRedis_Server_instanceDomain().getName().equals(pool.getRedis_Server_instanceDomain().getName())){
+						flag=true;//在里面
+						break;
+					}
+				}
+				if(!flag){
+					//add by sunJiaming 20141015
+					this.getJedisPool().destroy();
+					this.setJedisPool(createJedisPool(getRedis_Server_instanceDomain()));
+					readPoolList.add(this);
+				}
+			}else{
+				List<RedisPool> writePoolList=this.getKeyServerPools().getWriterPools();
+				boolean flag=false;
+				for(RedisPool pool:writePoolList){
+					if(this.getRedis_Server_instanceDomain().getName().equals(pool.getRedis_Server_instanceDomain().getName())){
+						flag=true;//在里面
+						break;
+					}
+				}
+				if(!flag){
+					//add by sunJiaming 20141015
+					this.getJedisPool().destroy();
+					this.setJedisPool(createJedisPool(getRedis_Server_instanceDomain()));
+					writePoolList.add(this);
+				}
+				
+			}
+		}
+	}
+
+	public Redis_ServerDomain getRedis_Server_instanceDomain() {
+		return redis_Server_instanceDomain;
+	}
+
+	public void setRedis_Server_instanceDomain(
+			Redis_ServerDomain redis_Server_instanceDomain) {
+		this.redis_Server_instanceDomain = redis_Server_instanceDomain;
+	}
+
+	public KeyHandler getKeyHandler() {
+		return keyHandler;
+	}
+
+	public void setKeyHandler(KeyHandler keyHandler) {
+		this.keyHandler = keyHandler;
+	}
+
+	public PubSubHandler getPubSubHandler() {
+		return pubSubHandler;
+	}
+
+	public void setPubSubHandler(PubSubHandler pubSubHandler) {
+		this.pubSubHandler = pubSubHandler;
+	}
+
+	public ListHandler getListHandler() {
+		return listHandler;
+	}
+
+	public void setListHandler(ListHandler listHandler) {
+		this.listHandler = listHandler;
+	}
+
+	public StringHandler getStringHandler() {
+		return stringHandler;
+	}
+
+	public void setStringHandler(StringHandler stringHandler) {
+		this.stringHandler = stringHandler;
+	}
+
+	public HashHandler getHashHandler() {
+		return hashHandler;
+	}
+
+	public void setHashHandler(HashHandler hashHandler) {
+		this.hashHandler = hashHandler;
+	}
+
+	public SetHandler getSetHandler() {
+		return setHandler;
+	}
+
+	public void setSetHandler(SetHandler setHandler) {
+		this.setHandler = setHandler;
+	}
+
+	public SortedSetHandler getSortedSetHandler() {
+		return sortedSetHandler;
+	}
+
+	public void setSortedSetHandler(SortedSetHandler sortedSetHandler) {
+		this.sortedSetHandler = sortedSetHandler;
+	}
+
+	public JedisPool getJedisPool() {
+		return jedisPool;
+	}
+
+	public void setJedisPool(JedisPool jedisPool) {
+		this.jedisPool = jedisPool;
+	}
+
+	public boolean isRead_only() {
+		return read_only;
+	}
+
+	public void setRead_only(boolean read_only) {
+		this.read_only = read_only;
+	}
+
+	public KeyServerPools getKeyServerPools() {
+		return keyServerPools;
+	}
+
+	public void setKeyServerPools(KeyServerPools keyServerPools) {
+		this.keyServerPools = keyServerPools;
+	}
+}
